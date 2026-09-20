@@ -4,11 +4,13 @@ import "../styles/global.css";
 interface Props {
   title?: string;
   description?: string;
+  home?: boolean;
 }
 
 const {
   title = "Yann 的第二大脑",
   description = "关于技术、学习与思考的公开知识库。",
+  home = false,
 } = Astro.props;
 const pageTitle = title === "Yann 的第二大脑" ? title : `${title} · Yann 的第二大脑`;
 ---
@@ -24,7 +26,7 @@ const pageTitle = title === "Yann 的第二大脑" ? title : `${title} · Yann �
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{pageTitle}</title>
   </head>
-  <body>
+  <body class:list={{ "home-page": home }}>
     <a class="skip-link" href="#main-content">跳到正文</a>
     <header class="site-header">
       <a class="site-brand" href="/" aria-label="Yann 的第二大脑首页">
