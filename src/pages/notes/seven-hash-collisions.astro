@@ -28,7 +28,15 @@ const stages = [
 ---
 
 <ArticleLayout {...article}>
-  <p class="lead">一张梗图提出了一个看似普通的需求：修改 PDF，却让七种哈希或校验值全部保持不变。我好奇的是，先不管怎么做，能不能从数学上证明这种“七项同时相同”的情况存在？</p>
+  <p class="lead">这次讨论起于下面这张梗图：有人愿意出 4000 元，寻找修改 PDF 却保持七种哈希或校验值全部不变的方法，或者找出七项结果都相同的不同文件。</p>
+  <figure class="meme-figure">
+    <a href="/images/notes/seven-hash-collisions/pdf-hash-request.jpg" aria-label="查看七种哈希校验需求的完整原图">
+      <img src="/images/notes/seven-hash-collisions/pdf-hash-request.jpg" width="1280" height="1682" alt="引发讨论的聊天截图：提出修改 PDF 或寻找不同文件的需求，要求 MD5、CRC32、SHA-1、SHA-256、SHA-512、SHA3-256、SHA3-512 七项结果同时不变，并报价 4000 元。" decoding="async" />
+    </a>
+    <figcaption>引发这次讨论的原图。图片由作者提供，原始出处未核实；仅作为问题背景，不代表需求已经实现。点击可查看完整尺寸。</figcaption>
+  </figure>
+  <p>看到这张图后，我更好奇的是一个数学问题：先不考虑怎么找到样本，能否严格证明，存在两个不同输入，能让这七项结果同时相同？于是我和 GPT 从这个问题出发，一步步讨论了输出组合的计数、鸽巢原理，以及“存在”和“找得到”之间的区别。</p>
+  <p>下面整理的是这次讨论的证明与边界。原图混合了“修改指定文件”和“自由寻找两个文件”两种要求；我们先证明后者在原始字节串上的存在性，再回头看它为什么没有直接解决原图中的 PDF 修改需求。</p>
   <aside class="callout">
     <strong>可以，但要说清楚证明对象。</strong>
     <p>在全部恰好 233 字节的原始字节串中，必然存在至少 256 个不同输入，它们的七项结果分别完全相同。这是无条件的计数结论；它既没有提供可行的搜索方法，也没有证明某份指定 PDF 能按要求修改。</p>
@@ -125,6 +133,10 @@ const stages = [
 </ArticleLayout>
 
 <style>
+  .meme-figure { margin: 2rem 0; }
+  .meme-figure a { display: block; width: fit-content; max-width: 100%; margin-inline: auto; }
+  .meme-figure img { display: block; width: 100%; max-width: 560px; height: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .meme-figure figcaption { max-width: 560px; margin: .8rem auto 0; line-height: 1.7; }
   .formula { margin: 1.5rem 0; padding: 1rem 1.2rem; border: 1px solid var(--line); background: var(--surface); font-family: ui-monospace, "PingFang SC", monospace; font-size: .95rem; line-height: 1.9; overflow-wrap: anywhere; }
   .count-diagram { margin: 2rem 0; padding: 1.5rem; display: grid; grid-template-columns: 1fr auto 1fr; gap: 1rem; align-items: center; border: 1px solid var(--line); background: var(--surface); text-align: center; font-family: system-ui, sans-serif; }
   .count-diagram > div { display: grid; gap: .5rem; }
