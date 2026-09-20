@@ -1,0 +1,56 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+
+interface TocItem {
+  href: string;
+  label: string;
+}
+
+interface Props {
+  title: string;
+  description: string;
+  publishedAt: string;
+  updatedAt?: string;
+  tags: string[];
+  toc?: TocItem[];
+}
+
+const { title, description, publishedAt, updatedAt, tags, toc = [] } = Astro.props;
+const formatDate = (date: string) =>
+  new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "Asia/Shanghai",
+  }).format(new Date(`${date}T00:00:00+08:00`));
+---
+
+<BaseLayout title={title} description={description}>
+  <div class="article-shell">
+    <article class="article">
+      <header class="article-header">
+        <a class="back-link" href="/">← 返回知识索引</a>
+        <div class="tag-list" aria-label="标签">
+          {tags.map((tag) => <span>{tag}</span>)}
+        </div>
+        <h1>{title}</h1>
+        <p class="article-deck">{description}</p>
+        <p class="article-date">
+          发布于 <time datetime={publishedAt}>{formatDate(publishedAt)}</time>
+          {updatedAt && <> · 更新于 <time datetime={updatedAt}>{formatDate(updatedAt)}</time></>}
+        </p>
+      </header>
+      <div class="article-body">
+        <slot />
+      </div>
+    </article>
+    {toc.length > 0 && (
+      <aside class="article-toc" aria-label="本文目录">
+        <p>本文目录</p>
+        <ol>
+          {toc.map((item) => <li><a href={item.href}>{item.label}</a></li>)}
+        </ol>
+      </aside>
+    )}
+  </div>
+</BaseLayout>

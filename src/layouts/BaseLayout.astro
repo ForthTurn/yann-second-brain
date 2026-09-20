@@ -1,0 +1,47 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = "Yann 的第二大脑",
+  description = "关于技术、学习与思考的公开知识库。",
+} = Astro.props;
+const pageTitle = title === "Yann 的第二大脑" ? title : `${title} · Yann 的第二大脑`;
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={Astro.generator} />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#0b1739" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到正文</a>
+    <header class="site-header">
+      <a class="site-brand" href="/" aria-label="Yann 的第二大脑首页">
+        <span class="brand-mark" aria-hidden="true">Y</span>
+        <span>Yann 的第二大脑</span>
+      </a>
+      <nav aria-label="主导航">
+        <a href="/">知识</a>
+        <a href="https://github.com/ForthTurn/yann-second-brain">GitHub</a>
+      </nav>
+    </header>
+    <main id="main-content">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <p>持续理解，持续修正。</p>
+      <p>内容更新于公开仓库。</p>
+    </footer>
+  </body>
+</html>

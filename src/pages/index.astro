@@ -1,0 +1,47 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { sortedArticles } from "../data/articles";
+
+const formatDate = (date: string) =>
+  new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Asia/Shanghai",
+  }).format(new Date(`${date}T00:00:00+08:00`));
+---
+
+<BaseLayout>
+  <section class="home-intro">
+    <p class="eyebrow">PUBLIC NOTES · 持续更新</p>
+    <h1>把好奇心<br /><em>留在时间里。</em></h1>
+    <p class="intro-copy">
+      这里收录我在学习、实践和深度讨论后留下的理解。每一篇内容都尽量做到可验证、可回顾，也允许在新的证据出现后被修正。
+    </p>
+  </section>
+
+  <section class="knowledge-index" aria-labelledby="knowledge-heading">
+    <div class="section-heading">
+      <h2 id="knowledge-heading">最近整理</h2>
+      <span>{sortedArticles.length.toString().padStart(2, "0")} 篇</span>
+    </div>
+    <ol class="article-list">
+      {sortedArticles.map((article, index) => (
+        <li>
+          <a href={article.path}>
+            <span class="article-number">{(index + 1).toString().padStart(2, "0")}</span>
+            <span class="article-summary">
+              <strong>{article.title}</strong>
+              <span>{article.description}</span>
+            </span>
+            <span class="article-meta">
+              <time datetime={article.publishedAt}>{formatDate(article.publishedAt)}</time>
+              <span>{article.tags.join(" · ")}</span>
+            </span>
+            <span class="article-arrow" aria-hidden="true">↗</span>
+          </a>
+        </li>
+      ))}
+    </ol>
+  </section>
+</BaseLayout>

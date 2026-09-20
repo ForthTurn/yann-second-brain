@@ -1,0 +1,72 @@
+---
+import ArticleLayout from "../../layouts/ArticleLayout.astro";
+
+const article = {
+  title: "从一次 AI 对话到可复用的知识",
+  description: "一套把即时讨论压缩、核验并沉淀为长期知识的方法。",
+  publishedAt: "2026-09-20",
+  tags: ["知识管理", "AI"],
+  toc: [
+    { href: "#why", label: "对话为什么容易消失" },
+    { href: "#pipeline", label: "四步沉淀流程" },
+    { href: "#standard", label: "什么值得被保留" },
+  ],
+};
+---
+
+<ArticleLayout {...article}>
+  <p class="lead">
+    一次很好的对话通常会带来大量即时启发，但聊天记录并不是知识。只有当结论被重新组织、核验，并放进以后找得到的结构里，它才开始产生复利。
+  </p>
+
+  <section id="why">
+    <h2>对话为什么容易消失</h2>
+    <p>
+      对话按时间展开，知识则需要按主题组织。聊天中会混有试探、修正、上下文依赖和未经验证的说法。直接保存全文，未来仍要重新经历一遍理解过程。
+    </p>
+    <aside class="callout">
+      <strong>判断标准</strong>
+      <p>如果三个月后的自己必须读完整段对话才能理解结论，这份内容还没有完成整理。</p>
+    </aside>
+  </section>
+
+  <section id="pipeline">
+    <h2>四步沉淀流程</h2>
+    <div class="knowledge-flow" role="img" aria-label="从原始对话到长期知识的四步流程：提取、核验、重构、连接">
+      <div><span>01</span><strong>提取</strong><p>找出真正改变理解的观点。</p></div>
+      <div><span>02</span><strong>核验</strong><p>区分事实、推断与个人判断。</p></div>
+      <div><span>03</span><strong>重构</strong><p>围绕问题重写，而非复述对话。</p></div>
+      <div><span>04</span><strong>连接</strong><p>加入来源、边界和相关主题。</p></div>
+    </div>
+    <p>
+      这四步并非要求每篇文章都很长。它们只是保证内容脱离原始情境后，仍能独立成立。一个清晰的模型、一张解释关系的图，或一段准确的反例，都可能比完整转录更有价值。
+    </p>
+  </section>
+
+  <section id="standard">
+    <h2>什么值得被保留</h2>
+    <div class="comparison-grid">
+      <div>
+        <h3>保留</h3>
+        <ul>
+          <li>改变原有判断的新证据</li>
+          <li>能够迁移到其他问题的方法</li>
+          <li>解释复杂关系的模型与图示</li>
+          <li>结论成立的条件和失效边界</li>
+        </ul>
+      </div>
+      <div>
+        <h3>舍弃</h3>
+        <ul>
+          <li>没有信息增量的寒暄</li>
+          <li>为探索而产生的重复表述</li>
+          <li>无法确认来源的确定性断言</li>
+          <li>只对当时语境有意义的细节</li>
+        </ul>
+      </div>
+    </div>
+    <p>
+      知识库不是记忆的仓库，而是一套持续改善判断的外部系统。内容可以不完整，但应诚实标出它目前知道什么、还不知道什么。
+    </p>
+  </section>
+</ArticleLayout>
