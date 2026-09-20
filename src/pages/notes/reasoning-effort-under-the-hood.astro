@@ -1,0 +1,459 @@
+---
+import ArticleLayout from "../../layouts/ArticleLayout.astro";
+
+const article = {
+  title: "推理强度究竟改变了什么？",
+  description: "从 DeepSeek 的公开训练方法出发，理解推理强度的通用机制，并推测闭源 GPT 可能如何实现。",
+  publishedAt: "2026-09-20",
+  tags: ["大模型", "推理"],
+  toc: [
+    { href: "#conclusion", label: "先说结论" },
+    { href: "#common-pattern", label: "共同的通用模式" },
+    { href: "#deepseek", label: "DeepSeek 的公开方法" },
+    { href: "#gpt", label: "GPT 已知与未知" },
+    { href: "#differences", label: "真正的差异" },
+    { href: "#practice", label: "如何选择推理强度" },
+    { href: "#sources", label: "资料与边界" },
+  ],
+};
+---
+
+<ArticleLayout {...article}>
+  <p class="lead">
+    把推理强度从 <code>low</code> 调到 <code>high</code>，通常不是给模型“换一个更聪明的大脑”，也不能简单理解为把某个固定 token 配额调大。更接近公开证据的解释是：模型在训练中学会了根据控制信号分配测试时计算，服务端再用生成上限、上下文和运行策略约束这段过程。
+  </p>
+
+  <aside class="scope-note">
+    <strong>证据范围</strong>
+    <p>本文写于 2026 年 9 月。DeepSeek 部分主要依据 R1、V3.2 论文与当前 API 文档；OpenAI 部分依据官方 API 文档和开放权重的 gpt-oss。涉及闭源 GPT 内部实现的内容会明确标为推测。</p>
+  </aside>
+
+  <section id="conclusion">
+    <h2>先说结论</h2>
+    <div class="conclusion-grid">
+      <article>
+        <span class="evidence confirmed">公开确认</span>
+        <h3>推理强度是模型的控制条件</h3>
+        <p>它告诉模型这次任务应投入多少思考。模型仍会按问题难度自适应，所以同一个等级不会稳定地产生相同数量的推理 token。</p>
+      </article>
+      <article>
+        <span class="evidence inferred">工程推论</span>
+        <h3>更高强度通常意味着更多生成步骤</h3>
+        <p>更多自回归步骤会增加延迟、费用和上下文占用。主要变化是“多走几步”，而不是让每一个 token 穿过更多层网络。</p>
+      </article>
+      <article>
+        <span class="evidence unknown">仍未公开</span>
+        <h3>闭源服务如何落实这个条件</h3>
+        <p>我们不知道 ChatGPT 是否还会路由到不同检查点、改变采样策略或使用并行候选。API 的相似不等于底层实现相同。</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="common-pattern">
+    <h2>GPT、DeepSeek 等大致共享什么模式？</h2>
+    <p>
+      公开资料指向一种相当通用的结构：先把“要不要思考、思考到什么程度”作为输入条件交给模型；模型生成一段面向内部求解的轨迹，再生成给用户看的最终答案；服务层负责执行总长度、上下文、超时与成本限制。
+    </p>
+
+    <div class="mechanism" role="img" aria-label="推理强度的通用机制：任务和推理强度组成请求，模型根据训练所得的策略生成可变长度的推理轨迹，随后输出最终答案；整个过程受到总生成上限和服务运行策略约束。">
+      <div class="mechanism-input">
+        <span>请求</span>
+        <strong>任务 + effort</strong>
+        <small>例如 low / medium / high</small>
+      </div>
+      <span class="arrow" aria-hidden="true">→</span>
+      <div class="mechanism-model">
+        <span>同一个模型策略</span>
+        <strong>按条件分配计算</strong>
+        <div class="token-line" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <small>推理长度随任务和强度变化</small>
+      </div>
+      <span class="arrow" aria-hidden="true">→</span>
+      <div class="mechanism-output">
+        <span>输出</span>
+        <strong>最终答案</strong>
+        <small>推理过程可能隐藏或返回</small>
+      </div>
+      <div class="runtime-limit">
+        <span>运行边界</span>
+        <p>总生成上限 · 上下文窗口 · 超时 · 服务策略</p>
+      </div>
+    </div>
+
+    <p>
+      这里有三个容易混淆的旋钮。<strong>推理强度</strong>是行为条件，影响模型愿意投入多少计算；<strong>最大输出 token</strong>是硬上限，防止推理与答案无限增长；<strong>回答详略</strong>控制用户看到的表达长度。把回答写得更长，并不等于模型思考得更深。
+    </p>
+
+    <div class="knob-grid">
+      <div><b>effort</b><strong>怎么分配思考</strong><p>软性的行为控制</p></div>
+      <div><b>max output</b><strong>最多生成多少</strong><p>推理和答案共享硬上限</p></div>
+      <div><b>verbosity</b><strong>答案写多详细</strong><p>面向用户的表达控制</p></div>
+    </div>
+  </section>
+
+  <section id="deepseek">
+    <h2>从 DeepSeek 的开源资料看，具体怎么做？</h2>
+    <p>
+      DeepSeek-R1 最重要的启示，不是它公开了一份“low、medium、high 参数表”，而是它证明了：只要奖励设计合适，模型可以在强化学习中自行发展出延长思考、回看前一步、尝试替代路线和自我验证等行为。
+    </p>
+
+    <div class="training-flow" role="img" aria-label="DeepSeek R1 的训练演进：从基础模型开始，R1-Zero 直接进行大规模强化学习，得到长推理、自我验证和反思等能力；R1 再加入少量可读的冷启动推理数据、多阶段强化学习和监督微调；最后把 R1 生成的推理样本蒸馏到较小模型。">
+      <div>
+        <span>01</span><strong>基础模型</strong><p>已有语言与知识能力，还没有稳定的长推理行为。</p>
+      </div>
+      <div>
+        <span>02</span><strong>结果驱动的 RL</strong><p>R1-Zero 直接奖励正确答案与格式，模型逐渐学会延长推理、反思和验证。</p>
+      </div>
+      <div>
+        <span>03</span><strong>冷启动 + 多阶段训练</strong><p>R1 加入数千条可读的长思维链样本，再结合推理 RL、监督微调和对齐 RL。</p>
+      </div>
+      <div>
+        <span>04</span><strong>蒸馏</strong><p>用 R1 产生的推理样本微调较小的 Qwen、Llama 模型，迁移解题模式。</p>
+      </div>
+    </div>
+
+    <h3>推理长度不是手写规则，而是训练结果</h3>
+    <p>
+      R1 论文展示了一个关键现象：随着强化学习推进，R1-Zero 的平均响应长度自然增加，模型也开始出现回溯和重新评估。这说明“多想一会儿”可以被奖励塑造为策略的一部分。它不需要工程师为每道题预先写出推理步骤。
+    </p>
+    <p>
+      后来的 DeepSeek-V3.2 把机制说得更直接：它同时准备长思维链的 <em>thinking</em> 数据与直接作答的 <em>non-thinking</em> 数据，用不同系统提示和 <code>&lt;think&gt;…&lt;/think&gt;</code> 标签区分，并把推理、工具使用和人类偏好合并到强化学习阶段。训练中还加入长度惩罚；减少长度惩罚的 Speciale 版本会使用更多推理 token，并在若干高难度评测上更强，但成本和延迟也更高。
+    </p>
+
+    <aside class="callout">
+      <strong>这能证明什么？</strong>
+      <p>公开资料证明模型可以学习“是否展开推理”和“投入多少测试时计算”的策略，也证明训练时的长度奖励会改变这种取舍。它没有完整公开当前托管 API 如何把每个 effort 档位映射成模型内部条件。</p>
+    </aside>
+
+    <h3>当前 DeepSeek API 又加了一层产品控制</h3>
+    <p>
+      当前文档把 thinking 开关和 effort 分开，并提供 <code>low</code>、<code>high</code>、<code>max</code> 等实际档位映射。思维链通过 <code>reasoning_content</code> 返回，最终答案放在 <code>content</code>。这让开发者能看到接口行为，但仍不能据此断言每一档只是固定 token 上限：文档描述的是档位映射，没有公开完整的服务端执行算法。
+    </p>
+  </section>
+
+  <section id="gpt">
+    <h2>闭源 GPT 可能采用什么方法？</h2>
+    <p>
+      对 OpenAI 的闭源模型，可以确认的事实比较有限：<code>reasoning.effort</code> 用来引导模型投入多少思考；推理 token 不通过 API 正文展示，但会占用上下文并按输出 token 计费；<code>max_output_tokens</code> 同时限制隐藏推理与可见答案。官方也明确提醒，实际推理 token 会随问题复杂度显著变化。
+    </p>
+
+    <div class="evidence-stack">
+      <article>
+        <span class="evidence confirmed">公开确认</span>
+        <h3>gpt-oss 提供了一个可观察样本</h3>
+        <p>OpenAI 的开放权重模型使用 Harmony 格式，在系统消息中直接放入 <code>Reasoning: low</code>、<code>medium</code> 或 <code>high</code>，并把分析与最终回答放在不同 channel。这证明 OpenAI 至少有一种实现，是让同一组模型权重读取显式的推理强度条件。</p>
+      </article>
+      <article>
+        <span class="evidence inferred">合理推测</span>
+        <h3>闭源 GPT 也可能接受预算条件</h3>
+        <p>最朴素的实现是：在训练样本中加入 effort 或预算信号，让模型学会在低档尽快作答，在高档进行更多检查和搜索；推理服务再负责总长度与超时边界。DeepSeek 的混合训练和 gpt-oss 的控制格式都支持这种推测。</p>
+      </article>
+      <article>
+        <span class="evidence unknown">仍未公开</span>
+        <h3>不能从 API 名字推出内部细节</h3>
+        <p>闭源 GPT 是否会切换模型检查点、使用额外验证器、生成多个候选再选择，或按任务动态路由，官方没有完整说明。ChatGPT 产品中的“思考时间”也不一定与 API 的 effort 一一对应。</p>
+      </article>
+    </div>
+
+    <p>
+      因此，最稳妥的心智模型是“<strong>训练得到的计算分配策略 + 推理时的资源边界</strong>”。它比“high 就固定多给 8,000 个 token”更准确，也比“high 会激活更多神经网络层”更符合自回归 Transformer 的常见执行方式。
+    </p>
+  </section>
+
+  <section id="differences">
+    <h2>GPT 与 DeepSeek 真正可见的差异</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>维度</th><th>OpenAI / GPT</th><th>DeepSeek</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>用户可见性</th>
+            <td>API 不返回原始隐藏推理；可查看推理 token 用量或摘要，具体能力依模型而定。</td>
+            <td>当前 API 将思维链放在 <code>reasoning_content</code>，与最终答案分开返回。</td>
+          </tr>
+          <tr>
+            <th>公开训练证据</th>
+            <td>闭源 GPT 的配方未公开；gpt-oss 展示了显式 effort 条件与 channel 分离。</td>
+            <td>R1、V3.2 论文公开了冷启动数据、GRPO、结果奖励、长度惩罚、混合 thinking / non-thinking 训练等方法。</td>
+          </tr>
+          <tr>
+            <th>档位语义</th>
+            <td>支持值和默认值随模型变化；更高 effort 是引导，不是固定 token 保证。</td>
+            <td>当前 API 把多种兼容值映射到 low、high、max，并允许关闭 thinking。</td>
+          </tr>
+          <tr>
+            <th>我们不能断言的事</th>
+            <td>无法确认闭源服务是否路由模型、并行采样或使用外部验证器。</td>
+            <td>无法仅凭 R1 论文推导当前线上模型各档位的全部服务端实现。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      两家的核心方向并不神秘：都在扩大测试时计算，让模型在提交答案前拥有更多生成、验证和工具调用机会。差异主要体现在训练配方公开程度、推理过程是否返回、档位设计与系统工程细节，而不是一个拥有“真正推理”、另一个只是“输出更长”。
+    </p>
+  </section>
+
+  <section id="practice">
+    <h2>对我们有什么启发？如何选择推理强度？</h2>
+    <p>
+      不要把最高档当成默认质量开关。更高强度扩大的是解决问题的机会空间，也会扩大绕远路、重复验证和错误前提上过度思考的空间。先按任务所需的最短可靠路径选择，再用真实任务评测调整。
+    </p>
+
+    <div class="effort-ladder">
+      <article>
+        <span>LOW</span>
+        <h3>答案路径短且清楚</h3>
+        <p>提取、分类、格式转换、简单改写、明确事实查询。</p>
+        <small>目标：减少等待与费用</small>
+      </article>
+      <article>
+        <span>MEDIUM</span>
+        <h3>大多数日常复杂任务</h3>
+        <p>普通代码、比较方案、总结多份材料、带少量约束的计划。</p>
+        <small>目标：作为默认平衡点</small>
+      </article>
+      <article>
+        <span>HIGH</span>
+        <h3>需要反复检查的任务</h3>
+        <p>复杂调试、架构权衡、数学推导、多约束决策和长链工具调用。</p>
+        <small>目标：用延迟换成功率</small>
+      </article>
+      <article>
+        <span>MAX / XHIGH</span>
+        <h3>只有评测证明值得时</h3>
+        <p>失败代价很高、任务确实受计算量限制，并且额外思考能稳定改善结果。</p>
+        <small>目标：解决少量最难样本</small>
+      </article>
+    </div>
+
+    <h3>用一次小评测代替直觉</h3>
+    <ol class="evaluation-list">
+      <li><strong>收集真实任务。</strong>选 20～50 个有代表性的样本，包含简单题和容易失败的边界题。</li>
+      <li><strong>只改变 effort。</strong>保持模型、提示词、工具和最大输出上限一致，每档重复运行以减少随机性。</li>
+      <li><strong>同时看四个指标。</strong>任务成功率、端到端延迟、token 成本、人工返工时间。</li>
+      <li><strong>选择最低的可靠档位。</strong>只有质量提升稳定且足以覆盖额外成本时，才向上调。</li>
+    </ol>
+
+    <aside class="decision-rule">
+      <span>一个实用规则</span>
+      <p>如果任务失败的主要原因是“没检查完、漏掉约束、过早下结论”，提高 effort 可能有效；如果原因是缺少事实、提示互相冲突、工具不可用或上下文错误，提高 effort 往往只是让模型更认真地走错路。</p>
+    </aside>
+  </section>
+
+  <section id="sources">
+    <h2>资料与结论边界</h2>
+    <p>本文优先使用官方文档、官方仓库与原始论文。接口和支持档位会随模型版本变化，使用时应再查看对应模型的最新文档。</p>
+    <ul class="source-list">
+      <li><a href="https://developers.openai.com/api/docs/guides/reasoning">OpenAI：Reasoning models</a> — effort、隐藏推理 token 与总输出上限。</li>
+      <li><a href="https://developers.openai.com/api/docs/guides/latest-model">OpenAI：Model guidance</a> — 不同任务的 effort 选择与“更高不总是更好”。</li>
+      <li><a href="https://developers.openai.com/cookbook/articles/openai-harmony">OpenAI：Harmony response format</a> — gpt-oss 的推理强度条件和 channel 结构。</li>
+      <li><a href="https://api-docs.deepseek.com/guides/thinking_mode/">DeepSeek：Thinking Mode</a> — thinking 开关、effort 映射与 <code>reasoning_content</code>。</li>
+      <li><a href="https://arxiv.org/abs/2501.12948">DeepSeek-R1 论文</a> — R1-Zero、冷启动、多阶段训练与蒸馏。</li>
+      <li><a href="https://arxiv.org/abs/2512.02556">DeepSeek-V3.2 论文</a> — thinking / non-thinking 混合训练、GRPO、长度惩罚与扩展测试时计算。</li>
+      <li><a href="https://github.com/deepseek-ai/DeepSeek-R1">DeepSeek-R1 官方仓库</a> — 模型、运行建议与公开权重入口。</li>
+    </ul>
+  </section>
+</ArticleLayout>
+
+<style>
+  code {
+    padding: 0.12em 0.38em;
+    border: 1px solid var(--line);
+    border-radius: 0.35rem;
+    background: #eef1f7;
+    font: 0.84em/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .scope-note,
+  .decision-rule {
+    margin: 2rem 0;
+    padding: 1.4rem 1.6rem;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .scope-note strong,
+  .decision-rule span {
+    color: var(--blue);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .scope-note p,
+  .decision-rule p { margin-bottom: 0; }
+
+  .conclusion-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    margin: 2rem 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .conclusion-grid article { padding: 1.4rem; }
+  .conclusion-grid article + article { border-left: 1px solid var(--line); }
+  .conclusion-grid h3 { margin: 1rem 0 0.6rem; font-size: 1.08rem; line-height: 1.35; }
+  .conclusion-grid p { margin: 0; color: var(--ink-soft); font-size: 0.88rem; line-height: 1.6; }
+
+  .evidence {
+    display: inline-block;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font: 750 0.7rem/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+  .confirmed { background: #d9f4e4; color: #155d36; }
+  .inferred { background: var(--blue-light); color: #173e9f; }
+  .unknown { background: #f2e7d1; color: #76511a; }
+
+  .mechanism {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto 1.35fr auto 1fr;
+    gap: 0.8rem;
+    align-items: center;
+    margin: 2.2rem 0;
+    padding: 1.4rem 1.4rem 5.2rem;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+
+  .mechanism-input,
+  .mechanism-model,
+  .mechanism-output {
+    min-height: 155px;
+    padding: 1.1rem;
+    border: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .mechanism-model { border-color: var(--blue); background: #f5f8ff; }
+  .mechanism span:not(.arrow) { color: var(--blue); font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+  .mechanism strong { display: block; margin: 0.35rem 0; font-size: 1.05rem; line-height: 1.3; }
+  .mechanism small { color: var(--ink-soft); line-height: 1.45; }
+  .arrow { color: var(--blue); font-size: 1.5rem; }
+  .token-line { display: flex; gap: 0.22rem; margin: 0.75rem 0; }
+  .token-line i { width: 12%; height: 0.45rem; background: var(--blue); opacity: 0.25; }
+  .token-line i:nth-child(n + 5) { opacity: 0.75; }
+
+  .runtime-limit {
+    position: absolute;
+    right: 1.4rem;
+    bottom: 1.3rem;
+    left: 1.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    border-top: 3px solid var(--ink);
+  }
+  .runtime-limit p { margin: 0; color: var(--ink-soft); font-size: 0.8rem; }
+
+  .knob-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    margin: 2rem 0;
+    border: 1px solid var(--line);
+    background: var(--ink);
+    color: white;
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+  .knob-grid div { padding: 1.35rem; }
+  .knob-grid div + div { border-left: 1px solid #435071; }
+  .knob-grid b { display: block; color: var(--acid); font: 700 0.72rem/1 ui-monospace, monospace; text-transform: uppercase; }
+  .knob-grid strong { display: block; margin-top: 1.6rem; }
+  .knob-grid p { margin: 0.25rem 0 0; color: #b9c2d8; font-size: 0.82rem; }
+
+  .training-flow {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    margin: 2rem 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+  .training-flow > div { min-height: 235px; padding: 1.25rem; display: flex; flex-direction: column; }
+  .training-flow > div + div { border-left: 1px solid var(--line); }
+  .training-flow span { color: var(--blue); font: 750 0.75rem/1 ui-monospace, monospace; }
+  .training-flow strong { margin-top: auto; font-size: 1rem; line-height: 1.35; }
+  .training-flow p { margin: 0.5rem 0 0; color: var(--ink-soft); font-size: 0.8rem; line-height: 1.55; }
+
+  .evidence-stack { margin: 2rem 0; border-top: 1px solid var(--line); }
+  .evidence-stack article { display: grid; grid-template-columns: 110px 1fr; column-gap: 1.25rem; padding: 1.5rem 0; border-bottom: 1px solid var(--line); }
+  .evidence-stack .evidence { justify-self: start; align-self: start; }
+  .evidence-stack h3 { margin: 0; font-size: 1.05rem; }
+  .evidence-stack p { grid-column: 2; margin: 0.5rem 0 0; color: var(--ink-soft); }
+
+  .table-wrap { margin: 2rem 0; overflow-x: auto; border: 1px solid var(--line); background: var(--surface); }
+  table { width: 100%; min-width: 650px; border-collapse: collapse; font: 0.88rem/1.6 Inter, ui-sans-serif, system-ui, sans-serif; }
+  th, td { padding: 1rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  thead th { background: var(--ink); color: white; }
+  tbody th { width: 18%; color: var(--blue); }
+  tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
+
+  .effort-ladder {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    margin: 2rem 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+  .effort-ladder article { padding: 1.25rem; border-top: 6px solid #b9c8ec; }
+  .effort-ladder article:nth-child(2) { border-top-color: #7799e8; }
+  .effort-ladder article:nth-child(3) { border-top-color: var(--blue); }
+  .effort-ladder article:nth-child(4) { border-top-color: var(--ink); }
+  .effort-ladder article + article { border-left: 1px solid var(--line); }
+  .effort-ladder span { color: var(--blue); font: 800 0.72rem/1 ui-monospace, monospace; }
+  .effort-ladder h3 { min-height: 3.2em; margin: 1.5rem 0 0.5rem; font-size: 1rem; line-height: 1.45; }
+  .effort-ladder p { color: var(--ink-soft); font-size: 0.82rem; line-height: 1.55; }
+  .effort-ladder small { display: block; margin-top: 1rem; font-weight: 700; }
+
+  .evaluation-list { padding-left: 1.4rem; }
+  .evaluation-list li { padding-left: 0.35rem; }
+  .source-list { padding-left: 1.2rem; }
+  .source-list a { color: var(--blue); text-underline-offset: 0.2em; }
+
+  @media (max-width: 760px) {
+    .conclusion-grid,
+    .training-flow,
+    .effort-ladder { grid-template-columns: 1fr 1fr; }
+    .conclusion-grid article:nth-child(3) { grid-column: 1 / -1; border-top: 1px solid var(--line); border-left: 0; }
+    .conclusion-grid article:nth-child(2) { border-left: 1px solid var(--line); }
+    .training-flow > div:nth-child(3),
+    .effort-ladder article:nth-child(3) { border-left: 0; }
+    .training-flow > div:nth-child(n + 3),
+    .effort-ladder article:nth-child(n + 3) { border-top: 1px solid var(--line); }
+    .mechanism { grid-template-columns: 1fr; padding-bottom: 7rem; }
+    .mechanism .arrow { transform: rotate(90deg); justify-self: center; }
+    .mechanism-input, .mechanism-model, .mechanism-output { min-height: 120px; }
+    .runtime-limit { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
+  }
+
+  @media (max-width: 520px) {
+    .conclusion-grid,
+    .knob-grid,
+    .training-flow,
+    .effort-ladder { grid-template-columns: 1fr; }
+    .conclusion-grid article + article,
+    .knob-grid div + div,
+    .training-flow > div + div,
+    .effort-ladder article + article { border-left: 0; border-top: 1px solid var(--line); }
+    .conclusion-grid article:nth-child(3) { grid-column: auto; }
+    .training-flow > div { min-height: 190px; }
+    .evidence-stack article { grid-template-columns: 1fr; }
+    .evidence-stack h3 { margin-top: 0.8rem; }
+    .evidence-stack p { grid-column: 1; }
+  }
+</style>
