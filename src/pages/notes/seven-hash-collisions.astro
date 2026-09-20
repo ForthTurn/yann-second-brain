@@ -33,7 +33,7 @@ const stages = [
     <a href="/images/notes/seven-hash-collisions/pdf-hash-request.jpg" aria-label="查看七种哈希校验需求的完整原图">
       <img src="/images/notes/seven-hash-collisions/pdf-hash-request.jpg" width="1280" height="1682" alt="引发讨论的聊天截图：提出修改 PDF 或寻找不同文件的需求，要求 MD5、CRC32、SHA-1、SHA-256、SHA-512、SHA3-256、SHA3-512 七项结果同时不变，并报价 4000 元。" decoding="async" />
     </a>
-    <figcaption>引发这次讨论的原图。图片由作者提供，原始出处未核实；仅作为问题背景，不代表需求已经实现。点击可查看完整尺寸。</figcaption>
+    <figcaption>聊天截图：有人报价 4000 元，要求修改 PDF 后七种哈希或校验值全部不变，或找到七项结果都相同的不同文件。</figcaption>
   </figure>
   <p>看到这张图后，我更好奇的是一个数学问题：先不考虑怎么找到样本，能否严格证明，存在两个不同输入，能让这七项结果同时相同？于是我和 GPT 从这个问题出发，一步步讨论了输出组合的计数、鸽巢原理，以及“存在”和“找得到”之间的区别。</p>
   <p>下面整理的是这次讨论的证明与边界。原图混合了“修改指定文件”和“自由寻找两个文件”两种要求；我们先证明后者在原始字节串上的存在性，再回头看它为什么没有直接解决原图中的 PDF 修改需求。</p>
