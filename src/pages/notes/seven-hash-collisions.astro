@@ -1,5 +1,7 @@
 ---
 import ArticleLayout from "../../layouts/ArticleLayout.astro";
+import { Image } from "astro:assets";
+import cardsAndCabinets from "../../assets/notes/seven-hash-collisions/cards-and-cabinets.png";
 
 const article = {
   title: "七种哈希同时碰撞，能严格证明它存在吗？",
@@ -12,8 +14,8 @@ const article = {
     { href: "#filter", label: "筛选为何不会破坏条件" },
     { href: "#difficulty", label: "存在不等于找得到" },
     { href: "#boundaries", label: "这没有证明什么" },
-    { href: "#sources", label: "参考资料" },
     { href: "#plain-language", label: "说人话：柜子总会装重" },
+    { href: "#sources", label: "参考资料" },
   ],
 };
 const stages = [
@@ -119,6 +121,20 @@ const stages = [
     </aside>
   </section>
 
+  <section id="plain-language">
+    <h2>说人话：柜子总会装重，但你未必找得到</h2>
+    <p>把每个文件想成一张不同的卡片。七种算法就像七台机器，每台读完卡片后，都按自己的固定规则给它打一个编号。我们把七个编号完整写在一张标签上：只有七项分别都相同，两张标签才算相同。</p>
+    <p>再想象一个大仓库：每一种可能的标签对应一个柜子，卡片必须放进标签对应的柜子。虽然柜子多得难以想象，但编号的长度固定，所以柜子的数量有上限。</p>
+    <p>这时只要卡片比柜子多，就一定有柜子装了不止一张卡片。就像把 11 张卡片放进 10 个柜子，不管怎么放，都不可能每个柜子最多只有一张。<strong>同一个柜子里的两张不同卡片，就是七项同时碰撞的两个文件。</strong>前面的计算还告诉我们：把全部 233 字节的可能输入都算上，卡片数至少是柜子数上限的 256 倍，所以至少有一个柜子能装下 256 张不同卡片。</p>
+    <figure class="analogy-figure">
+      <Image src={cardsAndCabinets} alt="两排共 10 个柜子，放入 A 到 K 共 11 张不同卡片。第 5 个柜子同时放着 E 和 F，其余各放一张。卡片代表不同文件，柜子编号代表七项结果的组合，同柜表示共同碰撞。" widths={[600, 1200, 1536]} sizes="(max-width: 820px) calc(100vw - 2rem), 760px" format="webp" loading="lazy" />
+      <figcaption>11 张卡片放进 10 个柜子的一种分配：E 和 F 同柜，代表两个不同文件的七项结果分别相同。数字仅用于类比，真实输出组合远不止 10 种。</figcaption>
+    </figure>
+    <p>你可能会担心：“为了让第二个编号一样，改了卡片，不就把第一个编号弄变了吗？”但这里根本没有改卡片，只是在给已经存在的卡片分类。我们证明的是一定有卡片会被分到同一个柜子，并没有找到一种能随意修改编号的方法。</p>
+    <p><strong>知道柜子里一定有重复，和找出哪两张卡片重复，是两件事。</strong>我们只看数量，就能断定重复存在，却没有因此拿到那两张卡片。如果没有捷径，逐张计算和比较的工作量可能大到现实中根本做不完。不过，这个比喻和计数证明都不能排除捷径；“很难找到”还需要对算法安全性的判断。它也不是说永远找不到：理论上，把有限的候选查到足够多，就一定能找到。</p>
+    <p>最后，仓库里某个柜子装了多张卡片，不代表<strong>你手里这张卡片</strong>所在的柜子也有第二张。更不能保证第二张恰好是一份能正常打开、内容又符合要求的 PDF。</p>
+    <p><strong>所以，数学能保证“某处一定有”，却没有替我们回答“具体在哪儿”“怎样找到”，更没有保证“你指定的这份文件就能改”。</strong>这正是那张梗图背后最有意思的区别。</p>
+  </section>
   <section id="sources">
     <h2>参考资料</h2>
     <p>整理与核验日期：2026 年 9 月 20 日。本文的有限集合证明在正文中完整给出；算法位数、术语与结构性攻击的背景参考以下一手资料。</p>
@@ -131,19 +147,12 @@ const stages = [
       <li><a href="https://www.iacr.org/archive/crypto2004/31520306/multicollisions.pdf">Antoine Joux，Multicollisions in Iterated Hash Functions，CRYPTO 2004</a>。</li>
     </ul>
   </section>
-  <section id="plain-language">
-    <h2>说人话：柜子总会装重，但你未必找得到</h2>
-    <p>把每个文件想成一张不同的卡片。七种算法就像七台机器，每台读完卡片后，都按自己的固定规则给它打一个编号。我们把七个编号完整写在一张标签上：只有七项分别都相同，两张标签才算相同。</p>
-    <p>再想象一个大仓库：每一种可能的标签对应一个柜子，卡片必须放进标签对应的柜子。虽然柜子多得难以想象，但编号的长度固定，所以柜子的数量有上限。</p>
-    <p>这时只要卡片比柜子多，就一定有柜子装了不止一张卡片。就像把 11 张卡片放进 10 个柜子，不管怎么放，都不可能每个柜子最多只有一张。<strong>同一个柜子里的两张不同卡片，就是七项同时碰撞的两个文件。</strong>前面的计算还告诉我们：把全部 233 字节的可能输入都算上，卡片数至少是柜子数上限的 256 倍，所以至少有一个柜子能装下 256 张不同卡片。</p>
-    <p>你可能会担心：“为了让第二个编号一样，改了卡片，不就把第一个编号弄变了吗？”但这里根本没有改卡片，只是在给已经存在的卡片分类。我们证明的是一定有卡片会被分到同一个柜子，并没有找到一种能随意修改编号的方法。</p>
-    <p><strong>知道柜子里一定有重复，和找出哪两张卡片重复，是两件事。</strong>我们只看数量，就能断定重复存在，却没有因此拿到那两张卡片。如果没有捷径，逐张计算和比较的工作量可能大到现实中根本做不完。不过，这个比喻和计数证明都不能排除捷径；“很难找到”还需要对算法安全性的判断。它也不是说永远找不到：理论上，把有限的候选查到足够多，就一定能找到。</p>
-    <p>最后，仓库里某个柜子装了多张卡片，不代表<strong>你手里这张卡片</strong>所在的柜子也有第二张。更不能保证第二张恰好是一份能正常打开、内容又符合要求的 PDF。</p>
-    <p><strong>所以，数学能保证“某处一定有”，却没有替我们回答“具体在哪儿”“怎样找到”，更没有保证“你指定的这份文件就能改”。</strong>这正是那张梗图背后最有意思的区别。</p>
-  </section>
 </ArticleLayout>
 
 <style>
+  .analogy-figure { margin: 2rem 0; }
+  .analogy-figure img { display: block; width: 100%; height: auto; border-radius: 8px; }
+  .analogy-figure figcaption { margin-top: .8rem; line-height: 1.7; }
   .meme-figure { margin: 2rem 0; }
   .meme-figure a { display: block; width: fit-content; max-width: 100%; margin-inline: auto; }
   .meme-figure img { display: block; width: 100%; max-width: 560px; height: auto; border: 1px solid var(--line); border-radius: 8px; }
