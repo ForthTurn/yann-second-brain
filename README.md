@@ -34,3 +34,5 @@ npm run build
 - Root directory：`/`
 
 仓库只维护这一套生产配置。构建产物不会提交到 Git，由 Cloudflare Pages 在每次 `main` 更新后生成。
+
+生产地址：<https://brain.duan19.top>
