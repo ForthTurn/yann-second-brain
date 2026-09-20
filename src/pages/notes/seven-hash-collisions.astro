@@ -1,0 +1,147 @@
+---
+import ArticleLayout from "../../layouts/ArticleLayout.astro";
+
+const article = {
+  title: "七种哈希同时碰撞，能严格证明它存在吗？",
+  description: "从一张修改 PDF 的梗图出发，用鸽巢原理证明共同碰撞必然存在，并分清存在性、搜索难度与第二原像问题。",
+  publishedAt: "2026-09-20",
+  tags: ["密码学", "数学", "哈希"],
+  toc: [
+    { href: "#question", label: "从梗图到数学命题" },
+    { href: "#proof", label: "233 字节的存在性证明" },
+    { href: "#filter", label: "筛选为何不会破坏条件" },
+    { href: "#difficulty", label: "存在不等于找得到" },
+    { href: "#boundaries", label: "这没有证明什么" },
+    { href: "#sources", label: "参考资料" },
+  ],
+};
+const stages = [
+  ["起始集合", "—", 1864],
+  ["MD5", "128", 1736],
+  ["CRC32", "32", 1704],
+  ["SHA-1", "160", 1544],
+  ["SHA-256", "256", 1288],
+  ["SHA-512", "512", 776],
+  ["SHA3-256", "256", 520],
+  ["SHA3-512", "512", 8],
+];
+---
+
+<ArticleLayout {...article}>
+  <p class="lead">一张梗图提出了一个看似普通的需求：修改 PDF，却让七种哈希或校验值全部保持不变。我好奇的是，先不管怎么做，能不能从数学上证明这种“七项同时相同”的情况存在？</p>
+  <aside class="callout">
+    <strong>可以，但要说清楚证明对象。</strong>
+    <p>在全部恰好 233 字节的原始字节串中，必然存在至少 256 个不同输入，它们的七项结果分别完全相同。这是无条件的计数结论；它既没有提供可行的搜索方法，也没有证明某份指定 PDF 能按要求修改。</p>
+  </aside>
+
+  <section id="question">
+    <h2>先把需求写成准确的命题</h2>
+    <p>这里的七项是 MD5、CRC32、SHA-1、SHA-256、SHA-512、SHA3-256 和 SHA3-512。其中 CRC32 是校验码，不是密码学哈希。以下固定各算法的版本、参数和计算规则，全部对同一份完整字节串计算。</p>
+    <p>把它们记作 H₁ 到 H₇。我们要找的是<strong>同一对</strong>不同输入 A、B，满足：</p>
+    <div class="formula" aria-label="存在不同的 A 和 B，使每个 i 从一到七都有 H i 的 A 值等于 B 值">∃ A ≠ B，∀ i ∈ &#123;1, …, 7&#125;，Hᵢ(A) = Hᵢ(B)</div>
+    <p>这不是找七对文件，每对只满足一项；也不是要求 MD5(A) 等于 SHA-256(A)。比较始终发生在<strong>同一个算法、两个不同输入</strong>之间。</p>
+    <p>定义一个七元组，把每个输入的全部结果完整记录下来：</p>
+    <div class="formula">F(x) = (H₁(x), H₂(x), …, H₇(x))</div>
+    <p>于是 F(A) = F(B) 当且仅当七个等式全部成立。把结果写成元组，或按固定长度拼接二进制摘要，只是记法变化，并没有减少条件，也没有赋予我们单独操控各项结果的能力。</p>
+  </section>
+
+  <section id="proof">
+    <h2>不需要无限输入，233 字节就够了</h2>
+    <p>七项输出的长度分别为 128、32、160、256、512、256、512 位，总和是：</p>
+    <div class="formula">N = 128 + 32 + 160 + 256 + 512 + 256 + 512 = 1856 位</div>
+    <p>位数依据来自 <a href="https://www.rfc-editor.org/rfc/rfc1321">MD5 规范</a>、<a href="https://www.rfc-editor.org/rfc/rfc1952">CRC32 的规范示例</a>、<a href="https://csrc.nist.gov/pubs/fips/180-4/upd1/final">FIPS 180-4</a> 和 <a href="https://csrc.nist.gov/pubs/fips/202/final">FIPS 202</a>。这里数的是二进制位，不是十六进制显示的字符数。</p>
+    <p>所以 F 的输出组合<strong>最多</strong>只有 2<sup>1856</sup> 种。这里不要求七种函数独立，也不要求每种组合都能出现；相关性或不可达的组合只会让实际输出种类更少。</p>
+    <p>再令 S 为所有恰好 233 字节的输入。每字节有 256 种取值，因此：</p>
+    <div class="formula">|S| = 256<sup>233</sup> = 2<sup>1864</sup> &gt; 2<sup>1856</sup></div>
+    <figure class="count-diagram">
+      <div><strong>2<sup>1864</sup></strong><span>不同的 233 字节输入</span></div>
+      <span class="diagram-arrow" aria-hidden="true">→</span>
+      <div><strong>至多 2<sup>1856</sup></strong><span>七项结果的组合</span></div>
+      <figcaption>输入比可容纳它们的结果类别更多，至少一个类别必须容纳多个不同输入。</figcaption>
+    </figure>
+    <p><strong>鸽巢原理：</strong>把 M 个对象放进至多 K 个盒子，至少有一个盒子装着不少于 ⌈M/K⌉ 个对象。否则，每个盒子的数量都小于 M/K，加起来就不足 M，与总数矛盾。</p>
+    <p>按 F(x) 的值把 S 分组，每组就是一个“盒子”。至少有一组的大小不小于：</p>
+    <div class="formula">2<sup>1864</sup> / 2<sup>1856</sup> = 2<sup>8</sup> = 256</div>
+    <p>这一组中的输入彼此不同，但 F 值全部相同。任取其中两个，就是同时满足七项相等的共同碰撞。<strong>证毕。</strong></p>
+    <h3>为什么恰好选 233？</h3>
+    <p>1856 位等于 232 字节。若固定输入长度为 L 字节，要让上述计数直接保证碰撞，只需 8L &gt; 1856，即 L &gt; 232，最小整数是 233。</p>
+    <p>这是<strong>这套固定长度计数证明的充分门槛</strong>，不是实际碰撞的最短长度。对 232 字节或更短的输入，上述数量上界不足以保证碰撞，但也不能排除碰撞。证明使用有限、很短的输入，还避开了具体哈希标准对最大消息长度的限制。</p>
+  </section>
+
+  <section id="filter">
+    <h2>“改第二项，会不会破坏第一项？”</h2>
+    <p>这是讨论中最容易卡住的地方：为满足另一项而修改文件，确实可能破坏已经满足的条件。但存在性证明根本没有修改文件。它是在一批不变的候选中，反复选取子集。</p>
+    <p>令 S₀ = S。第 i 步只在 Sᵢ₋₁ 内按 Hᵢ 分组，取最大的组 Sᵢ。若该算法输出 nᵢ 位，那么最多分出 2<sup>nᵢ</sup> 组，故：</p>
+    <div class="formula">Sᵢ ⊆ Sᵢ₋₁，|Sᵢ| ≥ |Sᵢ₋₁| / 2<sup>nᵢ</sup></div>
+    <div class="table-scroll" role="region" aria-label="逐步筛选的数量下界" tabindex="0">
+      <table>
+        <caption>每一步保留此前所有相等条件，再增加一项</caption>
+        <thead><tr><th scope="col">本步新增条件</th><th scope="col">输出位数</th><th scope="col">保留输入至少为</th></tr></thead>
+        <tbody>{stages.map(([name, bits, exponent]) => <tr><th scope="row">{name}</th><td>{bits}</td><td>2<sup>{exponent}</sup>{exponent === 8 && " = 256"}</td></tr>)}</tbody>
+      </table>
+    </div>
+    <p>因为 S₇ ⊆ S₆ ⊆ … ⊆ S₁，最后留下的每个输入都在此前选出的各组里，因而继承所有相等条件。最后仍至少剩下 256 个输入。这个证明与元组计数是同一件事的两种表达。</p>
+    <p><strong>乘起来的是分组数量的上界，不是独立事件的概率。</strong>整个论证没有随机性或独立性假设；它也不意味着实际枚举这些集合是可行的。</p>
+  </section>
+
+  <section id="difficulty">
+    <h2>存在性证明，不是搜索难度证明</h2>
+    <p>“在有限时间内不可能找到”并不准确。这里的候选集合是有限的，每次哈希计算也会结束。理论上，依次枚举不同的 233 字节输入并记录七元组，至多计算 2<sup>1856</sup> + 1 个候选就必然发现重复。这是有限但极其庞大的穷举上界，不是必要计算次数的下界。</p>
+    <h3>2<sup>928</sup> 从哪里来？</h3>
+    <p>若额外假设 F 像一个均匀随机的 1856 位函数，不同输入的结果独立，那么在 q 个不同候选中，碰撞对数的期望为 q(q − 1) / (2 × 2<sup>1856</sup>)。达到常数级碰撞概率所需的候选数因而约为：</p>
+    <div class="formula">q ≈ 2<sup>1856 / 2</sup> = 2<sup>928</sup></div>
+    <p>这是<strong>理想随机函数模型下的生日估算</strong>，不能当作这七个真实算法组合的实际安全强度，更不能声称所有算法都必须执行这么多次计算。</p>
+    <p>一个简单反例：把同一个 SHA-256 摘要重复七遍，记录长度变成 1792 位，但一次 SHA-256 碰撞就让七段全部相等。输出更长，不自动意味着安全性同比增加。</p>
+    <p>即便采用不同函数，也要研究结构。<a href="https://www.iacr.org/archive/crypto2004/31520306/multicollisions.pdf">Joux 的多重碰撞研究</a>说明，对某些迭代式哈希的拼接，结构性攻击可以优于把总输出当随机函数的朴素估算。它不是这七项组合已有实用攻击的证明，而是提醒我们不能直接相加安全强度。</p>
+    <h3>一个更稳妥的难度关系</h3>
+    <div class="formula">F(A) = F(B) 且 A ≠ B ⇒ SHA-256(A) = SHA-256(B)</div>
+    <p>任何能高效找出共同碰撞的方法，也就能高效给出 SHA-256 的碰撞；对其他分量同样如此。因此，<strong>只要其中一个分量仍具备抗碰撞性，共同碰撞就不能被高效找到</strong>。这是条件性的归约关系，不是对真实哈希的无条件时间下界证明。</p>
+    <p><a href="https://csrc.nist.gov/projects/hash-functions">NIST 对抗碰撞性的定义</a>强调的正是找到不同输入、相同输出在计算上不可行，而非碰撞不存在。本文的现实难度判断依赖这种密码学假设；计数证明本身不能证明“几乎不可能找到”。</p>
+  </section>
+
+  <section id="boundaries">
+    <h2>原图的 PDF 要求，比这个命题更强</h2>
+    <p>自由选择 A、B，寻找任意共同碰撞，是一个存在量词命题。给定文件 A，再找 B ≠ A 且 F(B) = F(A)，则是<strong>第二原像问题</strong>。鸽巢原理保证某个输出组里挤着多个输入，却不保证每个输出组都有多个输入。</p>
+    <p>例如，把四个输入映射到三个结果，完全可以出现分组大小 2、1、1。碰撞已经存在，但落在单元素组里的输入没有第二原像。这说明，单凭计数，不能推出某个指定文件一定有对应样本。</p>
+    <p>“合法 PDF”“显示特定内容”“只准修改某些位置”又增加了输入约束。全部 233 字节串并不都是合法 PDF，更不能保证碰撞的一组分别呈现想要的内容。要讨论受限集合，必须重新证明它的大小及性质；不能把任意字节串的结论直接移植过去。</p>
+    <aside class="callout">
+      <strong>这次讨论留下的准确结论</strong>
+      <p>七项共同碰撞的原始字节串必然存在，甚至在固定 233 字节的集合内就能严格证明。寻找样本在现实计算资源下的可行性是另一个问题；它不由鸽巢原理决定，也不能用这份证明保证某份指定 PDF 可以按要求修改。</p>
+    </aside>
+  </section>
+
+  <section id="sources">
+    <h2>参考资料</h2>
+    <p>整理与核验日期：2026 年 9 月 20 日。本文的有限集合证明在正文中完整给出；算法位数、术语与结构性攻击的背景参考以下一手资料。</p>
+    <ul>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc1321">RFC 1321：MD5</a>。本文仅引用输出长度，不沿用旧文中的安全性猜测。</li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc1952">RFC 1952：GZIP 中使用的 CRC32</a>。CRC 变体需固定，32 位计数不依赖具体变体。</li>
+      <li><a href="https://csrc.nist.gov/pubs/fips/180-4/upd1/final">FIPS 180-4：SHA-1 与 SHA-2</a>。</li>
+      <li><a href="https://csrc.nist.gov/pubs/fips/202/final">FIPS 202：SHA-3</a>。</li>
+      <li><a href="https://csrc.nist.gov/projects/hash-functions">NIST：哈希函数与抗碰撞、原像及第二原像性质</a>。</li>
+      <li><a href="https://www.iacr.org/archive/crypto2004/31520306/multicollisions.pdf">Antoine Joux，Multicollisions in Iterated Hash Functions，CRYPTO 2004</a>。</li>
+    </ul>
+  </section>
+</ArticleLayout>
+
+<style>
+  .formula { margin: 1.5rem 0; padding: 1rem 1.2rem; border: 1px solid var(--line); background: var(--surface); font-family: ui-monospace, "PingFang SC", monospace; font-size: .95rem; line-height: 1.9; overflow-wrap: anywhere; }
+  .count-diagram { margin: 2rem 0; padding: 1.5rem; display: grid; grid-template-columns: 1fr auto 1fr; gap: 1rem; align-items: center; border: 1px solid var(--line); background: var(--surface); text-align: center; font-family: system-ui, sans-serif; }
+  .count-diagram > div { display: grid; gap: .5rem; }
+  .count-diagram strong { font-size: 1.35rem; color: var(--blue); }
+  .count-diagram span { font-size: .85rem; }
+  .count-diagram .diagram-arrow { font-size: 1.6rem; }
+  figcaption { grid-column: 1 / -1; font-size: .8rem; color: var(--ink-soft); }
+  .table-scroll { overflow-x: auto; margin: 2rem 0; }
+  .table-scroll:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+  table { width: 100%; border-collapse: collapse; font-family: system-ui, sans-serif; font-size: .86rem; text-align: left; }
+  caption { text-align: left; margin-bottom: .8rem; color: var(--ink-soft); }
+  th, td { padding: .7rem .65rem; border-bottom: 1px solid var(--line); }
+  thead { background: var(--blue-light); }
+  @media (max-width: 520px) {
+    .count-diagram { grid-template-columns: 1fr; }
+    .count-diagram .diagram-arrow { transform: rotate(90deg); }
+    .formula { padding: .8rem; font-size: .85rem; }
+    th, td { padding: .6rem .4rem; }
+  }
+</style>
