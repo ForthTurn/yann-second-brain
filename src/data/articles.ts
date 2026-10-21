@@ -9,6 +9,13 @@ export type Article = {
 
 export const articles: Article[] = [
   {
+    path: "/notes/web-pki-trust-and-revocation/",
+    title: "Web PKI 的全局信任困境：从 emSign 事件到 certifi 的撤销代价",
+    description: "分析公共 CA 的全局签发权、被攻破中间 CA 的影响、CT 与撤销机制，以及 certifi #439 暴露的安全性和可用性冲突。",
+    publishedAt: "2026-10-21",
+    tags: ["Web PKI", "TLS", "证书撤销", "Python", "基础设施安全"],
+  },
+  {
     path: "/notes/claude-code-prompt-assembly/",
     title: "Claude Code 2.1.299：System Prompt 装配链分析",
     description: "研究提示词动态装配、前缀缓存、工具契约、子代理和长期记忆的技术设计。",
