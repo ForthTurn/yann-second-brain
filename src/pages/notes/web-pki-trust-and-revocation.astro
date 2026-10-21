@@ -1,0 +1,84 @@
+---
+import ArticleLayout from "../../layouts/ArticleLayout.astro";
+const article = {
+  title: "Web PKI 的全局信任困境：从 emSign 事件到 certifi 的撤销代价",
+  description: "分析公共 CA 的全局签发权、被攻破中间 CA 的影响、CT 与撤销机制，以及 certifi #439 暴露的安全性和可用性冲突。",
+  publishedAt: "2026-10-21",
+  tags: ["Web PKI", "TLS", "证书撤销", "Python", "基础设施安全"],
+  toc: [
+    { href: "#trust", label: "全局信任模型" },
+    { href: "#incident", label: "中间 CA 失陷" },
+    { href: "#revocation", label: "CT 与撤销" },
+    { href: "#certifi", label: "certifi 实际案例" },
+    { href: "#history", label: "为何如此设计" },
+    { href: "#design", label: "改进方向" }
+  ]
+};
+---
+<ArticleLayout {...article}>
+  <p class="lead">HTTPS 的信任安全不只依赖网站自己选择的 CA，而取决于客户端接受的整个公共信任根集合。一家机构下拥有广泛签发权限的中间 CA 私钥失陷，就可能对从未使用该 CA 的域名构成身份伪造风险。2026 年 emSign 弱私钥事件，以及 Python certifi 随后的根证书移除风波，分别揭示了 Web PKI 的全局授权风险和撤销粒度不足。</p>
+
+  <section id="trust">
+    <h2>1. Web PKI 的全局信任模型</h2>
+    <p>客户端并不要求某域名永远由某一家 CA 签发。它通常验证：证书域名匹配、有效期、用途和约束正确，签名链能够到达某个受信任的根，且满足适用的撤销及 CT 等策略。因此对同一个域名，多个不同 CA 签发的证书可以同时有效。</p>
+    <p>可以用一个近似谓词描述这种授权关系：<code>Accept(cert, domain) = exists valid path to a trusted root AND applicable policy checks pass</code>。这是“存在一条合法路径”而不是“此域名预先指定的 CA 签发”。由此出现最弱环节风险：任何一个获广泛信任、且签发权限不受域名限制的中间 CA 私钥失陷，都可能让攻击者冒充其他 CA 客户的网站。</p>
+    <p><strong>必须区分：</strong>这不意味着原有网站证书的私钥被破解，也不意味着所有客户端都必然受到攻击。攻击者是用被攻破的 CA 密钥为目标域名构造新的证书；实际 MITM 还依赖流量劫持能力、客户端信任链，以及 CT、黑名单、Pinning、撤销等防护是否适用。</p>
+  </section>
+
+  <section id="incident">
+    <h2>2. emSign 事件为什么严重</h2>
+    <p>2026 年披露的 eMudhra/emSign 事件涉及多个中间 CA 的椭圆曲线私钥随机性异常：按正常方式生成的 P-384 私钥应有极大的搜索空间，但公开分析显示相关密钥可以从极小候选集合中恢复。椭圆曲线关系 <code>Q = dG</code> 本身没有被攻破；真正失效的是私钥生成质量。</p>
+    <p>若持有受信任链上的中间 CA 签名私钥，攻击者可以给任意目标域名（以该中间 CA 的实际约束范围为限）签发新的终端证书，并尝试借助 DNS、网关或路由控制进行中间人攻击。对无强制 CT、无及时撤销数据的非浏览器 TLS 客户端尤其值得警惕。交叉签名会让简单的“撤销某一张中间证书”更难覆盖同一公钥的所有有效信任路径。</p>
+  </section>
+
+  <section id="revocation">
+    <h2>3. 证书透明度与撤销为什么都不能独立解决问题</h2>
+    <p><strong>CT（Certificate Transparency）</strong>让公共 TLS 证书签发进入可审计日志；SCT 是日志收录承诺，浏览器可以强制检查相应策略。CT 的核心价值是可发现与可追责，并非要求每次握手都在线查询日志，更不等于日志自动判断域名所有者是否授权。未强制 CT 的 TLS 客户端不能由它自动获得保护。</p>
+    <p><strong>CRL / OCSP</strong>提供证书撤销状态：CA 发布带签名的撤销信息，客户端验证并据此拒绝证书。但证书签名不会因被撤销而在数学上失效。客户端若不检查、查询失败时 soft-fail、或只使用过期缓存，撤销不会有效阻断连接。</p>
+    <p>浏览器通过 CRLSet、OneCRL、CRLite 等机制分发本地阻断信息，降低每次握手在线查询的成本。它们仍然依赖客户端实际获得并执行更新。对中间 CA 私钥失陷，按公钥（SPKI）标识封禁通常比只撤销一张特定序列号的中间证书更能覆盖交叉签名路径。</p>
+  </section>
+
+  <section id="certifi">
+    <h2>4. certifi #439：安全补救如何造成正常服务故障</h2>
+    <p>Python 的 <code>certifi</code> 主要分发静态根证书 PEM 集合，不是完整的证书链验证或在线吊销引擎。<code>requests</code> 等客户端如何进行 TLS 验证，还取决于 Python ssl/OpenSSL、操作系统和应用配置。常见 Requests 配置不会默认为每条链主动获取并强制执行所有中间证书的 CRL/OCSP 检查。</p>
+    <ol>
+      <li><a href="https://github.com/certifi/python-certifi/pull/437">PR #437</a>：2026-10-18 版本移除四张 emSign 根证书 G1、G3、C1、C3，从而切断依赖这些根的信任路径。</li>
+      <li><a href="https://github.com/certifi/python-certifi/issues/439">Issue #439</a>：用户报告美国科研教育生态中的部分 Python 连接出现问题，涉及 University of Michigan、Arizona State University，以及使用 emSign 信任路径的 InCommon 服务。维护者明确表示 certifi 没有只撤销特定中间 CA 的机制。</li>
+      <li><a href="https://github.com/certifi/python-certifi/pull/440">PR #440</a>：随后版本恢复未受影响的 G1、C1、C3，继续移除受影响的 G3 根，把影响范围缩小。</li>
+    </ol>
+    <p>这暴露了两层故障：<strong>全局授权带来高安全风险</strong>，而<strong>静态 CA bundle 只能通过移除信任锚实施粗粒度封禁</strong>，导致同一根下正常签发、未受攻击的证书也可能失去可信路径。若服务端存在另一条有效信任链，并不一定断连。</p>
+    <p>必须注意：将正常根恢复到证书包里，并不自动证明所有调用该包的客户端已获得针对受损中间 CA 的精确阻断能力。不同库及系统的撤销、路径验证、信任策略必须分别测试。</p>
+  </section>
+
+  <section id="history">
+    <h2>5. 为什么互联网选择这种结构？</h2>
+    <p>早期 HTTPS 最迫切的问题是陌生客户端第一次连接陌生网站时如何零配置确认公钥归属。把少量 CA 根预装到浏览器和操作系统中，允许 CA 自行验证域名控制权，使全球网站能够自由选择或更换 CA，而客户端无须预先维护每个域名与 CA 的映射。互操作性、开放竞争和低部署成本因此很强。</p>
+    <p>代价是未贯彻域名级最小权限：根证书计划授予广泛信任，实际签发授权在 CA 的运营流程中决定，而不是由客户端独立验证“该域名只能选择这些 CA”。若改为严格域名授权，又必须回答授权来自何处、如何可信更新、首次连接如何启动，以及网络不可用时如何处理。DNSSEC/DANE 提供了另一种方向，却面临生态部署与浏览器支持等现实门槛。</p>
+    <p>现代 Web PKI 通过 CA 审计、CT、CAA、短有效期、撤销分发和根计划治理逐步修补，但不能瞬间改变庞大的浏览器、操作系统、OpenSSL、Java、Go、容器镜像和嵌入式设备生态。技术上可用的机制不等于所有客户端都具备统一实现与更新能力。</p>
+  </section>
+
+  <section id="design">
+    <h2>6. 更合理的安全工程方向</h2>
+    <ol>
+      <li><strong>限制授权范围：</strong>在适当的 CA 层使用 Name Constraints，并研究基于 DNSSEC/DANE 或客户端可验证的域名级 CA 授权。CAA 能约束合规 CA 的签发流程，但不能阻止持有被盗中间 CA 密钥的攻击者。</li>
+      <li><strong>精确阻断中间 CA 公钥：</strong>统一支持基于 SPKI 的拒绝策略，以避免一把中间密钥失陷就删除整个根；必须识别多条路径与交叉签名。</li>
+      <li><strong>把撤销作为显式验证策略：</strong>定义状态最大新鲜度、查询失败时的 fail-open / fail-closed 选择，以及可离线分发的签名撤销数据；不能凭空保证永久离线客户端知道最新撤销结果。</li>
+      <li><strong>以可观测性衡量修复影响：</strong>补丁前后测试主要信任路径、证书有效性、MITM 拦截场景和受影响站点清单，避免只检查“根证书是否存在”。</li>
+      <li><strong>多层部署：</strong>浏览器级阻断、OS 根存储、应用级 CA bundle 与 TLS 引擎不能混为一谈。Python 可评估系统信任后端（例如 <a href="https://truststore.readthedocs.io/">truststore</a>），但真实撤销行为取决于平台和配置。</li>
+    </ol>
+    <p><strong>结论：</strong>Web PKI 是一次成功的全球互操作性工程，但信任授权过宽与撤销执行不一致带来了结构性风险。emSign 展示了低质量 CA 密钥如何跨域名放大攻击面；certifi 展示了细粒度封禁能力缺位时，紧急安全修复如何转化为正常服务的可用性故障。目标不是取消 CA，而是实现更小的授权范围、更精细的撤销能力与跨 TLS 客户端一致的安全策略。</p>
+    <h3>进一步阅读</h3>
+    <ul>
+      <li><a href="https://github.com/certifi/python-certifi/issues/439">certifi #439 — Why was emSign removed?</a></li>
+      <li><a href="https://github.com/certifi/python-certifi/pull/437">certifi #437 — Remove emsign</a></li>
+      <li><a href="https://github.com/certifi/python-certifi/pull/440">certifi #440 — Restore unaffected emSign roots</a></li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc5280">RFC 5280 — X.509 PKI certificates and CRLs</a></li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc6962">RFC 6962 — Certificate Transparency</a></li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc8659">RFC 8659 — DNS Certification Authority Authorization (CAA)</a></li>
+    </ul>
+  </section>
+</ArticleLayout>
+<style>
+  code{background:#eef1f7;padding:.1rem .35rem;border-radius:.3rem;overflow-wrap:anywhere}
+  strong{font-weight:650}
+</style>
