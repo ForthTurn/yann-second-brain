@@ -9,6 +9,13 @@ export type Article = {
 
 export const articles: Article[] = [
   {
+    path: "/notes/claude-code-prompt-assembly/",
+    title: "Claude Code 2.1.299：System Prompt 装配链分析",
+    description: "研究提示词动态装配、前缀缓存、工具契约、子代理和长期记忆的技术设计。",
+    publishedAt: "2026-10-21",
+    tags: ["Claude Code", "Agent Runtime", "Prompt Cache", "系统架构"],
+  },
+  {
     path: "/notes/seven-hash-collisions/",
     title: "七种哈希同时碰撞，能严格证明它存在吗？",
     description: "从一张修改 PDF 的梗图出发，用鸽巢原理证明共同碰撞必然存在，并分清存在性、搜索难度与第二原像问题。",

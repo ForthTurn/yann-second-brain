@@ -1,0 +1,61 @@
+---
+import ArticleLayout from "../../layouts/ArticleLayout.astro";
+const article = {
+  title: "Claude Code 2.1.299：System Prompt 装配链分析",
+  description: "研究提示词动态装配、前缀缓存、工具契约、子代理和长期记忆的技术设计。",
+  publishedAt: "2026-10-21",
+  tags: ["Claude Code", "Agent Runtime", "Prompt Cache", "系统架构"],
+  toc: [
+    { href: "#assembly", label: "提示词装配链" },
+    { href: "#cache", label: "缓存分层" },
+    { href: "#agent", label: "工具和子代理" },
+    { href: "#memory", label: "记忆和权限" },
+    { href: "#practice", label: "工程启示" }
+  ]
+};
+---
+<ArticleLayout {...article}>
+  <p class="lead">System Prompt 可以被设计成一套动态装配机制，而不是单一、始终固定的字符串。本文围绕 Claude Code 2.1.299 的提示词组织方式，分析 Prompt Assembly、缓存分层、工具 Schema 和 Agent Runtime 的架构设计。</p>
+  <section id="assembly">
+    <h2>1. Prompt Assembly：把系统指令看成可编译的数据结构</h2>
+    <p>装配设计使用 <code>PromptSection</code>（<code>id</code>、<code>text</code>、<code>scope</code>）、<code>JoinedSystemBlock</code>（正文及缓存归属），以及最终发出的 <code>WireSystemBlock</code>（<code>type: "text"</code>、<code>text</code> 和可选 <code>cache_control</code>）。装配流程可以归纳为：</p>
+    <ol><li>读取模型、CLI/SDK 入口、输出风格、权限和工具集合。</li><li>判定 Lean 或普通形态，按条件生成可选指令段。</li><li>删除 <code>null</code> 段，并将稳定的 <code>shared</code> 放在动态的 <code>session</code> 前面。</li><li>前置计费头和身份行，合并块并附加缓存控制标记。</li><li>连同独立的 <code>tools[]</code> 定义提交模型请求。</li></ol>
+    <p>身份行根据运行方式而变，例如交互式 CLI 的关键原文：</p>
+    <blockquote lang="en">You are Claude Code, Anthropic's official CLI for Claude.</blockquote>
+    <p><code>mergeSystemPrompt</code>处理默认、覆盖、主代理自定义、追加提示词的优先级。它说明模型行为的形成不仅取决于系统正文，还与运行时如何组合不同权威来源有关。</p>
+  </section>
+  <section id="cache">
+    <h2>2. Prompt Cache：稳定前缀与动态后缀</h2>
+    <div class="flow" role="img" aria-label="先放固定的 shared 指令以提高前缀复用，随后放会话动态的 session 指令"><div><strong>Shared</strong><span>角色 · 安全 · 工程规范</span></div><div><strong>Session</strong><span>环境 · 记忆 · 会话指引</span></div></div>
+    <p>装配流程采用 <code>__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__</code> 表示逻辑分界，该标记用于客户端切段，不等于最终正文必须出现这个字面值。缓存内部归属为 <code>null</code>、<code>org</code>、<code>global</code>；wire 标记使用 <code>ephemeral</code>，某些条件下附加 <code>ttl: "1h"</code>。实际缓存支持范围与命中行为仍取决于所接入的模型服务。</p>
+    <p><strong>工程建议：</strong>按全局、租户、用户、会话、轮次对 Prompt Segment 分级，并跟踪其版本与哈希；同时记录缓存命中 token、实际费用和延迟。缓存优化是性能工程，不应无意让私人上下文进入跨租户共享区。</p>
+  </section>
+  <section id="agent">
+    <h2>3. Tool Contract、MCP 与 Agent 委派</h2>
+    <p>工具体系涵盖内置工具与动态 MCP 工具；工具的可用范围受运行环境与授权条件影响。工具对象有 <code>name</code>、<code>description</code>、<code>input_schema</code>，与 System Prompt 作为独立请求部分发送。描述和 Schema 都会影响模型可选择的行动范围。</p>
+    <p>Agent 的 Schema 涉及 <code>subagent_type</code>、可选 <code>model</code>、<code>effort</code> 与 <code>isolation</code>。在这种设计中，<code>fork</code> 能继承当前上下文并避免原始工具输出全部进入主上下文，而非 fork 的子代理可从新上下文开始。由此可以设计两套委派契约：高上下文继承的 fork，以及低耦合、输入明确、结果有界的独立 Agent。</p>
+    <p>MCP 工具名采用 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 结构，并追加在工具列表中；同名同义的 MCP 工具并不等同于内置工具，因为执行语义、权限和 Schema 可能不同。</p>
+  </section>
+  <section id="memory">
+    <h2>4. Memory 与安全执行边界</h2>
+    <p>记忆机制区分 <code>user</code>、<code>feedback</code>、<code>project</code> 和 <code>reference</code> 四种持久化事实，通过独立文件与 <code>MEMORY.md</code> 索引组织。可从当前 Git 状态、现有代码和项目文档直接重新推导的信息不必写入长期记忆；而项目目标、行为偏好和外部资料线索更适合保存。</p>
+    <p>对于可能改变外部状态或难以逆转的操作，可以采用这样的约束：</p>
+    <blockquote lang="en">For actions that are hard to reverse or outward-facing, confirm first</blockquote>
+    <p>Prompt 约束不是安全边界本身。真正的多租户 Agent 执行器还须验证文件写入路径、网络访问范围、权限有效期、对外发布授权和审计记录。外部工具结果、粘贴内容及用户系统指令也必须分别处理，防范 Prompt Injection。</p>
+  </section>
+  <section id="practice">
+    <h2>5. 对 Agent 平台的工程启示</h2>
+    <p><strong>Prompt Compiler：</strong>建立 <code>id / scope / gate / version / priority / text</code> 的段级中间表示，支持确定性生成、快照和回归测试。<strong>Cache Telemetry：</strong>用真实请求监控不同前缀布局的缓存命中率与总成本。<strong>Subagent Contract：</strong>委派时定义目标、约束、允许工具、输入来源和预期输出，避免整个父上下文无差别复制。<strong>Execution Policy：</strong>敏感操作必须由执行器独立鉴权。<strong>Memory Lifecycle：</strong>为长期记忆记录来源、时间和更新策略。</p>
+    <p>建议先实现可复现的提示词编译器，再通过缓存指标判断成本收益，最后引入更复杂的多代理记忆与委派机制。技术设计不能先于真实需求和可观测结果。</p>
+  </section>
+</ArticleLayout>
+<style>
+  code{background:#eef1f7;padding:.1rem .35rem;border-radius:.3rem;overflow-wrap:anywhere}
+  .note{padding:1.25rem;border:1px solid var(--line);background:var(--surface);margin:2rem 0}
+  .flow{display:grid;grid-template-columns:1fr 1fr;gap:.65rem;margin:2rem 0}
+  .flow div{padding:1.4rem;border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:1rem}
+  .flow div:first-child{background:var(--ink);color:white}
+  .flow span{font-size:.85rem;opacity:.8}
+  blockquote{border-left:3px solid var(--blue);padding:1rem 1.25rem;background:var(--surface);overflow-wrap:anywhere}
+  @media(max-width:600px){.flow{grid-template-columns:1fr}}
+</style>
