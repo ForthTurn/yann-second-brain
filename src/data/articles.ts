@@ -9,6 +9,13 @@ export type Article = {
 
 export const articles: Article[] = [
   {
+    path: "/notes/dns-registration-delegation-and-troubleshooting/",
+    title: "从域名注册到 DNS 解析：一套完整的工作原理与排障方法",
+    description: "理解注册商、注册局、DNS 委派、递归和权威解析、CNAME Flattening，以及 DNS 异常的分层定位。",
+    publishedAt: "2026-10-29",
+    tags: ["DNS", "网络基础设施", "域名注册", "Cloudflare", "故障排查"],
+  },
+  {
     path: "/notes/web-pki-trust-and-revocation/",
     title: "Web PKI 的全局信任困境：从 emSign 事件到 certifi 的撤销代价",
     description: "分析公共 CA 的全局签发权、被攻破中间 CA 的影响、CT 与撤销机制，以及 certifi #439 暴露的安全性和可用性冲突。",
