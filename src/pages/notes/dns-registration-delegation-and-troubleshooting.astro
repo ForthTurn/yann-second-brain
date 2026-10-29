@@ -1,0 +1,163 @@
+---
+import ArticleLayout from "../../layouts/ArticleLayout.astro";
+const article = {
+  title: "从域名注册到 DNS 解析：一套完整的工作原理与排障方法",
+  description: "理解注册商、注册局、DNS 委派、递归和权威解析、CNAME Flattening，以及 DNS 异常的分层定位。",
+  publishedAt: "2026-10-29",
+  tags: ["DNS", "网络基础设施", "域名注册", "Cloudflare", "故障排查"],
+  toc: [
+    { href: "#overview", label: "系统全景" },
+    { href: "#registration", label: "注册商与注册局" },
+    { href: "#delegation", label: "NS 与分层委派" },
+    { href: "#resolution", label: "递归 DNS 与权威 DNS" },
+    { href: "#records", label: "常见记录与缓存" },
+    { href: "#flattening", label: "CNAME Flattening" },
+    { href: "#troubleshooting", label: "DNS 异常定位" },
+    { href: "#transfer", label: "域名转让" },
+    { href: "#references", label: "参考资料" }
+  ]
+};
+---
+<ArticleLayout {...article}>
+  <p class="lead">域名系统不是一个巨大的“域名到 IP”表，而是两套彼此关联的系统：注册体系解决“谁有权注册和管理域名”，DNS 解析体系解决“客户端该向谁问、拿到什么记录”。以 <code>duan19.top</code> 为教学样例，可以从域名注册、顶级域名委派一路追踪到 DNS 查询和 HTTPS 连接，并建立一套可复用的排障方法。</p>
+
+  <section id="overview">
+    <h2>1. 先看全景：注册控制面与解析数据面</h2>
+    <div class="diagram" role="img" aria-label="注册控制面：持有人经注册商向注册局提交注册及 NS 信息，注册局发布 TLD 委派；解析数据面：客户端经递归 DNS、根服务器、TLD DNS 找到域名权威 DNS，取得解析记录后建立 HTTPS 连接。">
+      <div class="flow-title">注册控制面</div>
+      <div class="nodes"><span>域名持有人</span><b>→</b><span>注册商 Registrar</span><b>→</b><span>注册局 Registry</span><b>→</b><span>TLD 委派数据</span></div>
+      <div class="flow-title">解析数据面</div>
+      <div class="nodes"><span>客户端</span><b>→</b><span>递归 DNS</span><b>→</b><span>根 / TLD DNS</span><b>→</b><span>域名权威 DNS</span></div>
+      <p class="diagram-caption">图中的箭头是职责或发现关系，不表示每次 DNS 查询都经过注册商或注册局。DNS 缓存命中时，递归服务器甚至无需访问根和权威服务器。</p>
+    </div>
+    <p><strong>关键区分：</strong>注册商、注册局并不参与每次用户访问网站时的 DNS 解析；DNS 找到 IP 后，TLS 握手及 HTTP 请求才会开始。DNS 返回一个 IP 不等于该 IP 已经被 TLS 验证为合法网站。</p>
+  </section>
+
+  <section id="registration">
+    <h2>2. 为什么不同注册商不能把同一个域名卖给两个人？</h2>
+    <p>注册商（Registrar）是面向用户的办理入口；注册局（Registry）维护某个顶级域名下的权威注册状态。例如不同注册商要注册同一个 <code>.top</code> 域名，必须通过该 TLD 对应的注册局系统进行创建，不能各自凭本地数据库宣称注册成功。</p>
+    <p>典型的注册接口采用 <strong>EPP（Extensible Provisioning Protocol）</strong>。先发送 <code>&lt;check&gt;</code> 询问域名是否可注册，之后发送 <code>&lt;create&gt;</code> 请求创建注册对象。<code>check</code> 并不锁定域名；即使两个注册商几乎同时看到“可注册”，也只能由注册局最终处理创建并决定是否成功。</p>
+    <pre><code>注册商 A ── check: available ──┐
+                               ├── 注册局：唯一的注册状态
+注册商 B ── check: available ──┘
+注册商 A ── create: success ────→ 域名已存在
+注册商 B ── create: rejected ──→ 不可重复创建</code></pre>
+    <p>可以把注册局理解为针对某个域名命名空间的唯一性协调者：类似数据库主键约束，但真实实现不必是单机 SQL 数据库。<code>duan19.top</code> 与 <code>duan19.com</code> 属于不同的注册命名空间，可以分别注册。</p>
+  </section>
+
+  <section id="delegation">
+    <h2>3. 注册商设置的 NS 如何成为互联网的委派信息？</h2>
+    <p>用户在注册商后台指定 <code>duan19.top</code> 的 NS。注册商向注册局提交更新；注册局将相关委派发布到 <code>.top</code> 顶级域名权威 DNS。递归解析器从根服务器得到 <code>.top</code> 的服务器地址，再从 <code>.top</code> 服务器得到目标域名的 NS 委派。</p>
+    <pre><code>根 DNS (.)                 知道 .top 的权威 DNS 在哪里
+  └── .top 顶级域名 DNS    知道 duan19.top 委派给哪些 NS
+        └── 域名权威 DNS   提供 duan19.top 的 A / MX / TXT 等记录</code></pre>
+    <p>根 DNS 不需要知道每个二级域名的 NS；每层维护下一层的委派，构成可扩展的层级系统。<strong>注册商里设置的 NS 是委派入口；域名权威 DNS 上的 zone 数据才包含日常解析记录。</strong> 父区的委派 NS 与子区 apex NS 也可以分别存在，应保持一致。</p>
+    <p>在已有域名下面增加 <code>sub.duan19.top NS ns1.example.net</code> 则属于子域名委派，和通过注册商设置整个 <code>duan19.top</code> 的 NS 不是同一层级。</p>
+  </section>
+
+  <section id="resolution">
+    <h2>4. 递归 DNS 与权威 DNS：帮忙找答案和负责给答案</h2>
+    <table><thead><tr><th>维度</th><th>递归 DNS（Resolver）</th><th>权威 DNS（Authoritative）</th></tr></thead><tbody>
+      <tr><td>职责</td><td>为客户端查询任意可访问的域名，缓存答案</td><td>对受托管的 zone 提供权威回答</td></tr>
+      <tr><td>实例</td><td>1.1.1.1、8.8.8.8</td><td>域名 NS 所指向的名称服务器</td></tr>
+      <tr><td>数据来源</td><td>缓存或迭代查询</td><td>本区配置及服务端实现的数据</td></tr>
+      <tr><td>关键应答标志</td><td>常见 RA（支持递归）</td><td>AA（声明权威回答）</td></tr>
+    </tbody></table>
+    <p>应用通常只询问本机配置的递归 DNS。若缓存未命中，递归服务器根据根 → TLD → 域名权威 DNS 的委派逐步查询，然后向客户端返回答案。<code>AA</code> 是报文标志，不是密码学身份认证；指定 <code>@服务器</code> 也不保证中间网络没有拦截 DNS 请求。</p>
+  </section>
+
+  <section id="records">
+    <h2>5. 怎么读一条 dig 输出？</h2>
+    <pre><code>duan19.top.    60    IN    A    192.0.2.10
+       NAME    TTL CLASS TYPE  RDATA</code></pre>
+    <p><code>NAME</code> 是记录的域名，尾部句点代表完整域名；<code>TTL</code> 是缓存生存时间（递归服务器通常显示剩余秒数）；<code>IN</code> 表示 Internet 类；<code>A</code> 表示 IPv4；最后是记录值。这里的 <code>192.0.2.10</code> 是专门预留的文档示例地址，不是生产源站。</p>
+    <p>常见类型：<code>A</code>（IPv4）、<code>AAAA</code>（IPv6）、<code>CNAME</code>（别名）、<code>NS</code>（名称服务器）、<code>MX</code>（邮件交换）、<code>TXT</code>（文本）、<code>CAA</code>（约束合规 CA 签发）。多条 A 记录代表多个候选地址，并不意味着客户端一定同时连接它们。</p>
+    <pre><code># 查询默认递归 DNS
+dig duan19.top A
+
+# 指定公共递归 DNS
+dig @1.1.1.1 duan19.top A
+
+# 查看委派链
+dig +trace duan19.top NS
+
+# 不请求递归，直接查权威服务器（将 NS 替换为实际值）
+dig @YOUR_AUTHORITATIVE_NS duan19.top A +norecurse</code></pre>
+    <p><code>+noall +answer</code> 只展示 Answer Section，便于比对地址；完整输出里的 <code>status</code>、<code>flags</code>、<code>SERVER</code>、<code>Query time</code> 则适合排障。<code>NOERROR</code> 代表协议上没有返回错误码，不保证答案一定正确；<code>+trace</code> 展示迭代查询过程，但本身不等于完成 DNSSEC 验证。</p>
+  </section>
+
+  <section id="flattening">
+    <h2>6. 为什么根域名 CNAME 会看到 A 记录？</h2>
+    <p>传统 DNS 中，CNAME 不宜与同一名称上的 SOA、NS 等其他记录共存，故根域名（zone apex）通常不能以普通 CNAME 形式委派到别名。Cloudflare 提供 <strong>CNAME Flattening</strong>：即使用户配置的是 DNS-only CNAME，Cloudflare 也可以自行解析别名目标，并对外回答最终的 A/AAAA 记录。</p>
+    <pre><code>duan19.top
+    └── CNAME → alb-demo.example.net    （示意目标）
+                        └── A → 192.0.2.10
+                        └── A → 198.51.100.20
+
+客户端查询 duan19.top A 时可能直接看到：
+duan19.top. 60 IN A 192.0.2.10
+duan19.top. 60 IN A 198.51.100.20</code></pre>
+    <p><strong>DNS-only（灰云）与 Proxied（橙云）不同：</strong>灰云时 Cloudflare 仅提供 DNS，客户端后续直接连接解析出的业务地址；橙云时客户端通常连接 Cloudflare 边缘网络，再由 Cloudflare 代理到源站。Flattening 依赖上游解析和缓存，不能因为某个地区出现异常 IP 就直接断言 Flattening 出错。</p>
+  </section>
+
+  <section id="troubleshooting">
+    <h2>7. 一个脱敏的 DNS 异常定位案例</h2>
+    <p>设某业务在 Cloudflare 托管 <code>duan19.top</code>，采用 DNS-only CNAME 指向海外负载均衡域名。正常情况下解析结果是示例地址 <code>192.0.2.10</code>、<code>198.51.100.20</code>；部分网络却偶发返回另一个不在预期集合中的地址，访问 HTTPS 时出现名称不匹配或自签名证书。</p>
+    <p><strong>现象不等于根因。</strong>错误 TLS 证书可能是客户端被 DNS 错误答案引到了不相关的服务；需要区分权威解析、递归缓存、DNS 应答注入、分地域策略，以及 DNS 之后的 TCP/代理问题。</p>
+    <pre><code>DOMAIN=duan19.top
+TARGET=alb-demo.example.net   # 将它替换为真实的负载均衡域名
+AUTH_NS=YOUR_AUTHORITATIVE_NS # 将它替换为实际权威 NS
+
+# 受影响网络与正常网络分别运行
+dig "$DOMAIN" A +noall +answer
+dig @1.1.1.1 "$DOMAIN" A +noall +answer
+dig @"$AUTH_NS" "$DOMAIN" A +norecurse
+dig @"$AUTH_NS" "$DOMAIN" A +tcp +norecurse
+
+# 对照 CNAME 目标及其权威解析
+dig "$TARGET" A
+dig +trace "$TARGET" A</code></pre>
+    <table><thead><tr><th>观察</th><th>优先排查</th></tr></thead><tbody>
+      <tr><td>受影响网络默认递归 DNS 异常，可信权威查询正常</td><td>递归缓存污染或 DNS 请求路径上的应答注入</td></tr>
+      <tr><td>权威 DNS 回答异常，上游目标域名正常</td><td>Flattening、缓存、配置及查询路径</td></tr>
+      <tr><td>上游目标权威解析也异常</td><td>目标域名服务、负载均衡解析策略和权威 DNS</td></tr>
+      <tr><td>DNS 正常但实际 TLS 连接落到错误地址</td><td>客户端缓存、代理、TCP 路由或透明重定向</td></tr>
+    </tbody></table>
+    <p>进一步可比较 UDP/53、TCP/53 和可信 DNS-over-HTTPS（DoH），保存完整 DNS 响应、AA 标志、TTL、时间戳与网络运营商信息；抓包时确认响应来源与查询 ID。普通的 <code>dig @1.1.1.1</code> 仍是明文 DNS，可能被路径上的中间设备影响。不同地点的权威 Anycast 节点或 GeoDNS 也可能返回不同但合法的结果，不能把“答案不同”直接等同于“遭劫持”。</p>
+    <p>若要检测异常 HTTPS 端点的证书，可通过 <code>openssl s_client -connect 192.0.2.10:443 -servername duan19.top</code> 查看 SNI 下返回的证书；这里仅演示语法，示例 IP 不提供真实业务。不要在生产客户端关闭 TLS 证书校验来绕过故障。</p>
+    <p><strong>证据界限：</strong>一次正常网络的查询，只能证明该时该网络下结果正常；不能证明所有地区、所有时刻都正常。仅凭异常证书的 Subject 也不能认定证书名对应的机构就是劫持实施者。</p>
+  </section>
+
+  <section id="transfer">
+    <h2>8. 域名如何出售或转让？</h2>
+    <p>域名交易转移的是注册持有人对域名的控制权，不是删除域名后让买家重新抢注。常见方式包括同注册商账户间 Push，以及使用 EPP AuthInfo 授权码办理跨注册商转移。<strong>注册持有人变更</strong>与<strong>注册商变更</strong>是两个不同维度，虽可同时发生但不能混为一谈。</p>
+    <p>交易时应使用可信的资金托管，完成域名控制权与注册人信息交接，并确认 DNS、DNSSEC、邮箱及服务关联账户的权限。转移期间 NS 可以保持不变，因此业务解析不必然中断。跨注册商转移可能受到新注册、近期转移或持有人变更后的等待限制，具体以适用注册政策为准。</p>
+  </section>
+
+  <section id="references">
+    <h2>9. 参考资料</h2>
+    <ul>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc1034">RFC 1034 — Domain Names: Concepts and Facilities</a></li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc1035">RFC 1035 — Domain Names: Implementation and Specification</a></li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc5730">RFC 5730 — Extensible Provisioning Protocol (EPP)</a></li>
+      <li><a href="https://www.rfc-editor.org/rfc/rfc5731">RFC 5731 — EPP Domain Name Mapping</a></li>
+      <li><a href="https://developers.cloudflare.com/dns/cname-flattening/">Cloudflare — CNAME Flattening</a></li>
+      <li><a href="https://www.icann.org/resources/pages/registrars/registrars-en">ICANN — Registrars</a></li>
+    </ul>
+    <p><strong>范围说明：</strong>本文所有架构域名、ALB 地址及故障 IP 均为公开教学示例；DNS 排查部分用于说明判定方法，不对特定运营商、服务商或实际故障归因。</p>
+  </section>
+</ArticleLayout>
+<style>
+  code{background:#eef1f7;padding:.1rem .35rem;border-radius:.3rem;overflow-wrap:anywhere}
+  pre{overflow-x:auto;background:#f2f5fa;padding:1rem;border-radius:.65rem;line-height:1.55;font-size:.88rem}
+  pre code{background:transparent;padding:0}
+  table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}
+  th,td{padding:.7rem;border-bottom:1px solid #e4e7ee;text-align:left;vertical-align:top;min-width:10rem}
+  .diagram{border:1px solid #d9e1ed;border-radius:1rem;padding:1rem;margin:1.2rem 0}
+  .flow-title{font-weight:700;margin:.45rem 0}
+  .nodes{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;margin-bottom:1rem}
+  .nodes span{padding:.55rem .7rem;background:#eff4fb;border-radius:.5rem;font-size:.91rem}
+  .nodes b{color:#64748b}
+  .diagram-caption{font-size:.87rem;color:#64748b}
+  strong{font-weight:650}
+</style>
