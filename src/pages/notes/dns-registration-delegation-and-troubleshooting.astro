@@ -64,6 +64,47 @@ const article = {
       <tr><td>关键应答标志</td><td>常见 RA（支持递归）</td><td>AA（声明权威回答）</td></tr>
     </tbody></table>
     <p>应用通常只询问本机配置的递归 DNS。若缓存未命中，递归服务器根据根 → TLD → 域名权威 DNS 的委派逐步查询，然后向客户端返回答案。<code>AA</code> 是报文标志，不是密码学身份认证；指定 <code>@服务器</code> 也不保证中间网络没有拦截 DNS 请求。</p>
+    <h3>一次完整的递归解析：客户端只问一次，解析器可能问很多次</h3>
+    <p>以 <code>www.duan19.top A</code> 为例，假设客户端与递归服务器均无可用缓存，域名权威服务器直接返回一个示例 IP <code>192.0.2.10</code>。客户端使用<strong>存根解析器（Stub Resolver）</strong>向递归 DNS 请求结果，并在查询报文中设置 <code>RD=1</code>（Recursion Desired）。下方箭头按时间自上而下排列，灰色阶段由递归解析器主动查询，<strong>根服务器和 TLD 服务器只提供转介，并不会主动替客户端继续查询</strong>。</p>
+    <figure class="dns-sequence">
+      <svg viewBox="0 0 700 440" role="img" aria-labelledby="dns-seq-title dns-seq-desc" xmlns="http://www.w3.org/2000/svg">
+        <title id="dns-seq-title">DNS 递归与迭代查询时序图</title>
+        <desc id="dns-seq-desc">客户端向递归 DNS 发送请求；递归 DNS 检查缓存后依次向根服务器、顶级域名服务器和域名权威服务器发出迭代查询，得到 IP 后缓存并返回客户端。</desc>
+        <g fill="#eaf0fb" stroke="#ced9ed"><rect x="8" y="8" width="116" height="39" rx="8"/><rect x="149" y="8" width="116" height="39" rx="8"/><rect x="290" y="8" width="116" height="39" rx="8"/><rect x="431" y="8" width="116" height="39" rx="8"/><rect x="572" y="8" width="116" height="39" rx="8"/></g>
+        <g fill="#24334b" font-size="14" font-weight="600" text-anchor="middle"><text x="66" y="32">客户端</text><text x="207" y="32">递归 DNS</text><text x="348" y="32">根 DNS</text><text x="489" y="32">.top DNS</text><text x="630" y="32">权威 DNS</text></g>
+        <g stroke="#aab8cc" stroke-dasharray="5 7" stroke-width="1.5"><line x1="66" y1="51" x2="66" y2="433"/><line x1="207" y1="51" x2="207" y2="433"/><line x1="348" y1="51" x2="348" y2="433"/><line x1="489" y1="51" x2="489" y2="433"/><line x1="630" y1="51" x2="630" y2="433"/></g>
+        <g stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path stroke="#2563eb" d="M66 89H207m-8 -6 8 6 -8 6"/>
+          <path stroke="#64748b" d="M207 151H348m-8 -6 8 6 -8 6"/>
+          <path stroke="#64748b" d="M348 185H207m8 -6 -8 6 8 6"/>
+          <path stroke="#64748b" d="M207 239H489m-8 -6 8 6 -8 6"/>
+          <path stroke="#64748b" d="M489 273H207m8 -6 -8 6 8 6"/>
+          <path stroke="#64748b" d="M207 327H630m-8 -6 8 6 -8 6"/>
+          <path stroke="#16a34a" d="M630 361H207m8 -6 -8 6 8 6"/>
+          <path stroke="#2563eb" d="M207 410H66m8 -6 -8 6 8 6"/>
+        </g>
+        <g fill="#24334b" font-size="12" text-anchor="middle">
+          <text x="136" y="80">请求 RD=1</text><text x="277" y="142">问根 NS</text><text x="277" y="201">返回 .top 委派</text>
+          <text x="348" y="230">问 .top</text><text x="348" y="290">返回域名 NS</text>
+          <text x="418" y="317">查询 A 记录</text><text x="418" y="378">A = 192.0.2.10</text><text x="137" y="402">返回答案</text>
+        </g>
+        <g fill="#64748b" font-size="11"><text x="217" y="117">缓存未命中</text><text x="217" y="394">缓存结果</text></g>
+      </svg>
+      <figcaption>DNS 请求时序（示意）：根/TLD 返回 referral，递归服务器根据 referral 自己向下一级发送新查询。真实解析还可能包含缓存命中、NS 地址解析、CNAME、DNSSEC 验证及重试。</figcaption>
+    </figure>
+    <ol>
+      <li><strong>客户端发出请求：</strong>操作系统存根解析器询问配置的递归 DNS，查询 <code>www.duan19.top A</code>，通常设置 <code>RD=1</code>。</li>
+      <li><strong>递归 DNS 查缓存：</strong>如果缓存仍在 TTL 内，立即返回；无命中时继续。解析器可能利用已缓存的根、TLD 或域名 NS，而无需从根开始。</li>
+      <li><strong>向根 DNS 迭代：</strong>根服务器不直接提供网站 IP，而是返回 <code>.top</code> 的 NS 委派，有时附带 glue 地址。</li>
+      <li><strong>向 .top 权威 DNS 迭代：</strong>TLD 服务器返回 <code>duan19.top</code> 被委派到哪些域名权威服务器。</li>
+      <li><strong>向域名权威 DNS 查询：</strong>得到 A 记录 <code>192.0.2.10</code>。若遇到 CNAME，解析器可能需要继续解析别名目标；域名 apex 的 CNAME Flattening 可能直接给出 A/AAAA。</li>
+      <li><strong>缓存与答复：</strong>解析器按各记录 TTL 缓存结果，并向客户端返回最终应答。客户端拿到 IP 后才开始实际的 TCP/TLS 或 QUIC 连接。</li>
+    </ol>
+    <h3>为什么客户端发 RD=1，递归服务器往往发 RD=0？</h3>
+    <p><code>RD</code>（Recursion Desired）表示<strong>请求接收方提供递归服务</strong>，而不是“这条 DNS 报文属于哪一类服务器”。客户端通常设置 <code>RD=1</code>，交给可递归的解析器；递归解析器向根、TLD、权威服务器发起迭代查询时，通常设置 <code>RD=0</code>。响应中的 <code>RA</code> 表示响应服务器声明支持递归，<code>AA</code> 表示权威回答。这三个标志用途不同。</p>
+    <p><strong>不要把查询方式与服务器身份混为一谈：</strong>递归 DNS 是提供完整解析服务的角色；迭代查询是被查询服务器给出答案或下一步转介的查询过程。一个递归解析器恰恰经常通过若干次迭代查询来完成客户端的一次递归请求。</p>
+    <h3>缓存与中间状态</h3>
+    <p>实际场景可能发生本地浏览器或操作系统缓存命中、递归 DNS 缓存命中、只缓存了 TLD 委派、目标域名返回 CNAME、NS 地址需要单独解析、权威 DNS 超时后重试等情况。因此“完整访问总要查根 DNS”并不成立。<code>dig +trace</code> 刻意展示委派链，适合学习迭代过程，但并不代表普通浏览器每次访问都执行同样的流程。</p>
   </section>
 
   <section id="records">
